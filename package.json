@@ -1,0 +1,14 @@
+{
+  "name": "proyecto-lector-documentos-motor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Motor SaaS multi-tenant de procesamiento y validación documental",
+  "scripts": {
+    "test": "node --test tests/*.test.ts",
+    "simulate": "node scripts/simular-lote.ts"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
