@@ -9,7 +9,8 @@
     "simulate": "node scripts/simular-lote.ts",
     "db:check": "node scripts/probar-db.ts",
     "db:migrate": "node scripts/aplicar-schema.ts",
-    "flow:run": "node scripts/ejecutar-flujo-real.ts"
+    "flow:run": "node scripts/ejecutar-flujo-real.ts",
+    "ingesta:start": "node scripts/arrancar-ingesta.ts"
   },
   "engines": {
     "node": ">=24.0.0"
