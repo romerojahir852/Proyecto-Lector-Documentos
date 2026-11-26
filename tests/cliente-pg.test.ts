@@ -95,4 +95,24 @@ describe("clientePg", () => {
     assert.deepEqual(eventos, ["BEGIN", "INSERT FAIL", "ROLLBACK"]);
     assert.equal(liberado, true);
   });
+
+  it("soporta scripts multi-sentencia que retornan arrays de resultados sin fallar", async () => {
+    const poolMock: PoolLike = {
+      async query() {
+        return [
+          { rows: undefined, rowCount: undefined },
+          { rows: [{ id: 1 }], rowCount: 1 },
+        ];
+      },
+      async connect() {
+        throw new Error("No necesario");
+      },
+      async end() {},
+    };
+
+    const db = adaptarPoolPg(poolMock);
+    const res = await db.query("CREATE TABLE a; CREATE TABLE b; SELECT * FROM b;", []);
+    assert.deepEqual(res.rows, [{ id: 1 }]);
+    assert.equal(res.rowCount, 1);
+  });
 });

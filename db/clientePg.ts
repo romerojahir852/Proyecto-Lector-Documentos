@@ -17,7 +17,7 @@ export interface PoolLike {
   query<R extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: unknown[]
-  ): Promise<{ rows: R[]; rowCount: number | null }>;
+  ): Promise<{ rows?: R[]; rowCount?: number | null } | Array<{ rows?: R[]; rowCount?: number | null }>>;
   connect(): Promise<PoolClientLike>;
   end(): Promise<void>;
 }
@@ -26,7 +26,7 @@ export interface PoolClientLike {
   query<R extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: unknown[]
-  ): Promise<{ rows: R[]; rowCount: number | null }>;
+  ): Promise<{ rows?: R[]; rowCount?: number | null } | Array<{ rows?: R[]; rowCount?: number | null }>>;
   release(): void;
 }
 
@@ -48,18 +48,34 @@ function resolverSsl(
 function envolverExecutor(executor: Pick<PoolLike | PoolClientLike, "query">): {
   query<T = Record<string, unknown>>(
     sql: string,
-    params: readonly unknown[]
+    params?: readonly unknown[]
   ): Promise<ResultadoQuery<T>>;
 } {
   return {
     async query<T = Record<string, unknown>>(
       sql: string,
-      params: readonly unknown[]
+      params?: readonly unknown[]
     ): Promise<ResultadoQuery<T>> {
-      const res = await executor.query(sql, [...params]);
+      // Si params está vacío o no se define, no pasamos values a pg para permitir multi-queries
+      const res =
+        params && params.length > 0
+          ? await executor.query(sql, [...params])
+          : await executor.query(sql);
+
+      // Cuando pg ejecuta un script con múltiples sentencias, devuelve un array de QueryResults
+      if (Array.isArray(res)) {
+        const ultimo = res[res.length - 1];
+        const rows = (ultimo?.rows ?? []) as T[];
+        return {
+          rows,
+          rowCount: ultimo?.rowCount ?? rows.length,
+        };
+      }
+
+      const rows = (res?.rows ?? []) as T[];
       return {
-        rows: res.rows as T[],
-        rowCount: res.rowCount ?? res.rows.length,
+        rows,
+        rowCount: res?.rowCount ?? rows.length,
       };
     },
   };
