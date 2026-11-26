@@ -12,6 +12,7 @@ import type {
 } from "../validator/validarRegistro.ts";
 
 export type EstadoCola = "pendiente" | "procesando" | "listo" | "error";
+export type EstadoLote = "procesando" | "finalizado" | "con_errores";
 
 export interface TrabajoCola {
   archivo: ArchivoEntradaTrabajo;
@@ -34,15 +35,29 @@ export interface ExpedienteAgrupado {
   nombreTercero: string | null;
   periodo: string;
   cantidadRegistros: number;
+  cantidadListos: number;
+  cantidadRevisionRapida: number;
   montoTotal: number;
   tienePendientesRevision: boolean;
   registros: RegistroProcesado[];
+}
+
+export interface ResumenLote {
+  estadoLote: EstadoLote;
+  totalArchivos: number;
+  archivosListos: number;
+  archivosConError: number;
+  archivosPendientes: number;
+  totalRegistros: number;
+  registrosListos: number;
+  registrosRevisionRapida: number;
 }
 
 export interface OpcionesCola {
   maxIntentos?: number;
   umbralConfianzaMinimo?: number;
   montoMaximoAlerta?: number;
+  permitirMontoCero?: boolean;
 }
 
 export class ProcesadorLotes {
@@ -50,6 +65,7 @@ export class ProcesadorLotes {
   private readonly maxIntentos: number;
   private readonly umbralConfianzaMinimo: number;
   private readonly montoMaximoAlerta?: number;
+  private readonly permitirMontoCero: boolean;
 
   private readonly hashesPorTenant = new Map<string, Set<string>>();
   private readonly clavesPorTenant = new Map<string, Set<string>>();
@@ -62,6 +78,7 @@ export class ProcesadorLotes {
       : 3;
     this.umbralConfianzaMinimo = opciones?.umbralConfianzaMinimo ?? 0.85;
     this.montoMaximoAlerta = opciones?.montoMaximoAlerta;
+    this.permitirMontoCero = Boolean(opciones?.permitirMontoCero);
   }
 
   private obtenerContextoTenant(tenantId: string): ContextoValidacion {
@@ -83,6 +100,7 @@ export class ProcesadorLotes {
       clavesDuplicadoProbable: claves,
       umbralConfianzaMinimo: this.umbralConfianzaMinimo,
       montoMaximoAlerta: this.montoMaximoAlerta,
+      permitirMontoCero: this.permitirMontoCero,
     };
   }
 
@@ -93,6 +111,7 @@ export class ProcesadorLotes {
     trabajos: TrabajoCola[];
     registros: RegistroProcesado[];
     expedientes: ExpedienteAgrupado[];
+    resumen: ResumenLote;
   }> {
     const ctx = this.obtenerContextoTenant(tenantId);
     const trabajos: TrabajoCola[] = archivos.map((archivo) => ({
@@ -172,7 +191,8 @@ export class ProcesadorLotes {
     }
 
     const expedientes = agruparEnExpedientes(tenantId, registros);
-    return { trabajos, registros, expedientes };
+    const resumen = resumirEstadoLote(trabajos, registros);
+    return { trabajos, registros, expedientes, resumen };
   }
 }
 
@@ -199,6 +219,8 @@ export function agruparEnExpedientes(
         nombreTercero: reg.candidato.nombreTercero ?? null,
         periodo,
         cantidadRegistros: 0,
+        cantidadListos: 0,
+        cantidadRevisionRapida: 0,
         montoTotal: 0,
         tienePendientesRevision: false,
         registros: [],
@@ -211,10 +233,15 @@ export function agruparEnExpedientes(
       exp.montoTotal =
         Math.round((exp.montoTotal + reg.validacion.montoNormalizado) * 100) / 100;
     }
+
     const estado: EstadoFlujo = reg.validacion.estadoFlujo;
-    if (estado === "revision_rapida") {
+    if (estado === "listo") {
+      exp.cantidadListos += 1;
+    } else {
+      exp.cantidadRevisionRapida += 1;
       exp.tienePendientesRevision = true;
     }
+
     if (!exp.nombreTercero && reg.candidato.nombreTercero) {
       exp.nombreTercero = reg.candidato.nombreTercero;
     }
@@ -222,4 +249,42 @@ export function agruparEnExpedientes(
   }
 
   return Array.from(mapa.values());
+}
+
+export function resumirEstadoLote(
+  trabajos: TrabajoCola[],
+  registros: RegistroProcesado[]
+): ResumenLote {
+  let archivosListos = 0;
+  let archivosConError = 0;
+  let archivosPendientes = 0;
+
+  for (const t of trabajos) {
+    if (t.estadoCola === "listo") archivosListos += 1;
+    else if (t.estadoCola === "error") archivosConError += 1;
+    else archivosPendientes += 1;
+  }
+
+  let registrosListos = 0;
+  let registrosRevisionRapida = 0;
+  for (const r of registros) {
+    if (r.validacion.estadoFlujo === "listo") registrosListos += 1;
+    else registrosRevisionRapida += 1;
+  }
+
+  let estadoLote: EstadoLote = "procesando";
+  if (archivosPendientes === 0) {
+    estadoLote = archivosConError > 0 ? "con_errores" : "finalizado";
+  }
+
+  return {
+    estadoLote,
+    totalArchivos: trabajos.length,
+    archivosListos,
+    archivosConError,
+    archivosPendientes,
+    totalRegistros: registros.length,
+    registrosListos,
+    registrosRevisionRapida,
+  };
 }

@@ -57,6 +57,7 @@ CREATE TABLE registros_extraidos (
   datos_crudos JSONB NOT NULL DEFAULT '{}'::jsonb,
   creado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
   actualizado_en TIMESTAMPTZ NOT NULL DEFAULT now(),
+  indice_candidato INT NOT NULL DEFAULT 0,
   FOREIGN KEY (tenant_id, lote_id) REFERENCES lotes_carga(tenant_id, id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id, archivo_id) REFERENCES archivos_entrada(tenant_id, id) ON DELETE CASCADE
 );
@@ -81,6 +82,8 @@ CREATE INDEX idx_archivos_tenant_lote ON archivos_entrada(tenant_id, lote_id);
 CREATE INDEX idx_archivos_hash_tenant ON archivos_entrada(tenant_id, hash_sha256);
 CREATE INDEX idx_registros_tenant_flujo ON registros_extraidos(tenant_id, estado_flujo);
 CREATE INDEX idx_registros_tenant_id ON registros_extraidos(tenant_id, identificacion);
+CREATE UNIQUE INDEX uq_registros_tenant_archivo_idx
+  ON registros_extraidos(tenant_id, archivo_id, indice_candidato);
 CREATE INDEX idx_expedientes_tenant ON expedientes(tenant_id, periodo);
 
 -- Row Level Security (RLS) base: activa RLS en todas las tablas multi-tenant

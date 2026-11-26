@@ -16,6 +16,7 @@ export interface ContextoValidacion {
   clavesDuplicadoProbable: Set<string>; // ej. `${identificacion}|${fecha}|${monto}|${referencia}`
   umbralConfianzaMinimo?: number; // por defecto 0.85
   montoMaximoAlerta?: number; // opcional: umbral operativo para revisar
+  permitirMontoCero?: boolean; // útil para retenciones/notas/comprobantes en 0.00
 }
 
 export interface ResultadoValidacion {
@@ -26,16 +27,125 @@ export interface ResultadoValidacion {
   fechaValida: string | null;
 }
 
-export function limpiarIdentificacion(raw?: string | null): string | null {
-  if (!raw) return null;
-  const limpia = raw.replace(/[^0-9A-Za-z]/g, "").trim().toUpperCase();
-  return limpia.length >= 6 ? limpia : null;
+export interface ResultadoIdentificacion {
+  valor: string | null;
+  formatoDudoso: boolean;
+  digitoVerificadorInvalido: boolean;
 }
 
-export function normalizarMonto(raw?: number | string | null): number | null {
+function esProvinciaEcuatorianaValida(codigo: string): boolean {
+  const prov = Number(codigo);
+  return (prov >= 1 && prov <= 24) || prov === 30;
+}
+
+function verificarModulo10Cedula(digitos: string): boolean {
+  const coef = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+  let suma = 0;
+  for (let i = 0; i < 9; i++) {
+    let prod = Number(digitos[i]) * coef[i];
+    if (prod >= 10) prod -= 9;
+    suma += prod;
+  }
+  const verificador = (10 - (suma % 10)) % 10;
+  return verificador === Number(digitos[9]);
+}
+
+function verificarModulo11(digitos: string, coef: number[], posVerificador: number): boolean {
+  let suma = 0;
+  for (let i = 0; i < coef.length; i++) {
+    suma += Number(digitos[i]) * coef[i];
+  }
+  const residuo = suma % 11;
+  const verificador = residuo === 0 ? 0 : 11 - residuo;
+  if (verificador === 10) return false;
+  return verificador === Number(digitos[posVerificador]);
+}
+
+export function analizarIdentificacion(raw?: string | null): ResultadoIdentificacion {
+  if (!raw) {
+    return { valor: null, formatoDudoso: false, digitoVerificadorInvalido: false };
+  }
+  const limpia = raw.replace(/[^0-9A-Za-z]/g, "").trim().toUpperCase();
+  if (limpia.length < 6) {
+    return { valor: null, formatoDudoso: false, digitoVerificadorInvalido: false };
+  }
+
+  const esSoloDigitos = /^[0-9]+$/.test(limpia);
+  if (esSoloDigitos) {
+    // Estándar habitual Ecuador: cédula (10) o RUC (13)
+    if (limpia.length !== 10 && limpia.length !== 13) {
+      return { valor: limpia, formatoDudoso: true, digitoVerificadorInvalido: false };
+    }
+
+    if (!esProvinciaEcuatorianaValida(limpia.slice(0, 2))) {
+      return { valor: limpia, formatoDudoso: true, digitoVerificadorInvalido: false };
+    }
+
+    const tercerDigito = Number(limpia[2]);
+
+    if (limpia.length === 10) {
+      if (tercerDigito > 5) {
+        return { valor: limpia, formatoDudoso: true, digitoVerificadorInvalido: false };
+      }
+      const valido = verificarModulo10Cedula(limpia);
+      return {
+        valor: limpia,
+        formatoDudoso: false,
+        digitoVerificadorInvalido: !valido,
+      };
+    }
+
+    // Longitud 13 (RUC)
+    const establecimiento = limpia.slice(10, 13);
+    if (establecimiento === "000") {
+      return { valor: limpia, formatoDudoso: true, digitoVerificadorInvalido: false };
+    }
+
+    if (tercerDigito <= 5) {
+      const valido = verificarModulo10Cedula(limpia.slice(0, 10));
+      return {
+        valor: limpia,
+        formatoDudoso: false,
+        digitoVerificadorInvalido: !valido,
+      };
+    }
+
+    if (tercerDigito === 6) {
+      const valido = verificarModulo11(limpia, [3, 2, 7, 6, 5, 4, 3, 2], 8);
+      return {
+        valor: limpia,
+        formatoDudoso: false,
+        digitoVerificadorInvalido: !valido,
+      };
+    }
+
+    if (tercerDigito === 9) {
+      const valido = verificarModulo11(limpia, [4, 3, 2, 7, 6, 5, 4, 3, 2], 9);
+      return {
+        valor: limpia,
+        formatoDudoso: false,
+        digitoVerificadorInvalido: !valido,
+      };
+    }
+
+    return { valor: limpia, formatoDudoso: true, digitoVerificadorInvalido: false };
+  }
+
+  // Identificadores alfanuméricos (ej. pasaporte/exterior): mínimo 6, máximo 20
+  const formatoDudoso = limpia.length > 20;
+  return { valor: limpia, formatoDudoso, digitoVerificadorInvalido: false };
+}
+
+export function limpiarIdentificacion(raw?: string | null): string | null {
+  return analizarIdentificacion(raw).valor;
+}
+
+export function normalizarMonto(
+  raw?: number | string | null,
+  permitirCero = false
+): number | null {
   if (raw === null || raw === undefined || raw === "") return null;
   let texto = String(raw).trim().replace(/\s+/g, "");
-  // Maneja formatos como "1,234.56" o "1.234,56"
   if (texto.includes(",") && texto.includes(".")) {
     if (texto.lastIndexOf(",") > texto.lastIndexOf(".")) {
       texto = texto.replace(/\./g, "").replace(",", ".");
@@ -43,7 +153,6 @@ export function normalizarMonto(raw?: number | string | null): number | null {
       texto = texto.replace(/,/g, "");
     }
   } else if (texto.includes(",")) {
-    // Si tiene una sola coma y 1-2 decimales al final, tratar como decimal
     if (/^[^,]+,\d{1,2}$/.test(texto)) {
       texto = texto.replace(",", ".");
     } else {
@@ -51,7 +160,8 @@ export function normalizarMonto(raw?: number | string | null): number | null {
     }
   }
   const num = Number(texto);
-  if (!Number.isFinite(num) || num <= 0) return null;
+  if (!Number.isFinite(num)) return null;
+  if (permitirCero ? num < 0 : num <= 0) return null;
   return Math.round(num * 100) / 100;
 }
 
@@ -73,7 +183,6 @@ export function validarFechaISO(raw?: string | null): string | null {
   ) {
     return null;
   }
-  // Evita fechas futuras absurdas (más de 1 día adelante respecto a hoy UTC)
   const ahora = new Date();
   const mananaUtc = Date.UTC(
     ahora.getUTCFullYear(),
@@ -104,34 +213,39 @@ export function validarYClasificarRegistro(
   const motivosAlerta: string[] = [];
   const umbral = ctx.umbralConfianzaMinimo ?? 0.85;
 
-  const identificacionLimpia = limpiarIdentificacion(cand.identificacion);
-  const montoNormalizado = normalizarMonto(cand.monto);
+  const infoId = analizarIdentificacion(cand.identificacion);
+  const identificacionLimpia = infoId.valor;
+  const montoNormalizado = normalizarMonto(cand.monto, Boolean(ctx.permitirMontoCero));
   const fechaValida = validarFechaISO(cand.fechaDocumento);
 
   if (!identificacionLimpia) {
     motivosAlerta.push("IDENTIFICACION_FALTANTE_O_INVALIDA");
+  } else {
+    if (infoId.formatoDudoso) {
+      motivosAlerta.push("IDENTIFICACION_FORMATO_DUDOSO");
+    }
+    if (infoId.digitoVerificadorInvalido) {
+      motivosAlerta.push("IDENTIFICACION_DIGITO_VERIFICADOR_INVALIDO");
+    }
   }
-  if (montoNormalizado === null) {
-    motivosAlerta.push("MONTO_FALTANTE_O_INVALIDO");
-  }
-  if (!fechaValida) {
-    motivosAlerta.push("FECHA_FALTANTE_O_INVALIDA");
-  }
+
+  if (montoNormalizado === null) motivosAlerta.push("MONTO_FALTANTE_O_INVALIDO");
+  if (!fechaValida) motivosAlerta.push("FECHA_FALTANTE_O_INVALIDA");
   if (!cand.referencia || cand.referencia.trim().length < 2) {
     motivosAlerta.push("REFERENCIA_FALTANTE");
   }
   if (
     typeof cand.confianza !== "number" ||
-    Number.isNaN(cand.confianza) ||
+    !Number.isFinite(cand.confianza) ||
+    cand.confianza < 0 ||
+    cand.confianza > 1 ||
     cand.confianza < umbral
   ) {
     motivosAlerta.push("BAJA_CONFIANZA_EXTRACCION");
   }
-
   if (ctx.hashesExistentesEnTenant.has(cand.hashSha256)) {
     motivosAlerta.push("ARCHIVO_DUPLICADO_EXACTO");
   }
-
   if (identificacionLimpia && fechaValida && montoNormalizado !== null) {
     const clave = generarClaveDuplicadoProbable(
       identificacionLimpia,
@@ -143,7 +257,6 @@ export function validarYClasificarRegistro(
       motivosAlerta.push("REGISTRO_DUPLICADO_PROBABLE");
     }
   }
-
   if (
     ctx.montoMaximoAlerta !== undefined &&
     montoNormalizado !== null &&
@@ -152,11 +265,8 @@ export function validarYClasificarRegistro(
     motivosAlerta.push("SUPERA_UMBRAL_REVISION");
   }
 
-  const estadoFlujo: EstadoFlujo =
-    motivosAlerta.length === 0 ? "listo" : "revision_rapida";
-
   return {
-    estadoFlujo,
+    estadoFlujo: motivosAlerta.length === 0 ? "listo" : "revision_rapida",
     motivosAlerta,
     montoNormalizado,
     identificacionLimpia,

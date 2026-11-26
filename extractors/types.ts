@@ -28,6 +28,11 @@ export interface ResultadoExtraccion {
   candidatos: CampoExtraidoCandidato[];
 }
 
+export interface ProveedorExtraccionDocumental {
+  readonly nombre: string;
+  extraerDocumento(archivo: ArchivoEntradaTrabajo): Promise<ResultadoExtraccion>;
+}
+
 export interface ExtractorDocumentos {
   readonly nombre: string;
   readonly canal: CanalExtraccion;

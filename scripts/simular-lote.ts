@@ -24,7 +24,7 @@ async function main(): Promise<void> {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-15",
         monto: "1,250.40",
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         nombreTercero: "Distribuidora Andes S.A.",
         referencia: "001-001-000451",
         confianza: 0.99,
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
         tipoDocumento: "comprobante",
         fechaDocumento: "2026-11-18",
         monto: "349,60",
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         nombreTercero: "Distribuidora Andes S.A.",
         referencia: "TRF-88219",
         confianza: 0.94,
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-15",
         monto: "1,250.40",
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         nombreTercero: "Distribuidora Andes S.A.",
         referencia: "001-001-000451",
         confianza: 0.99,
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
         tipoDocumento: "factura",
         fechaDocumento: "2029-05-01",
         monto: "500.00",
-        identificacion: "0992233445001",
+        identificacion: "0991234578001",
         nombreTercero: "Servicios Pacífico",
         referencia: "FAC-900",
         confianza: 0.97,
@@ -111,9 +111,12 @@ async function main(): Promise<void> {
   console.log("\n=== EXPEDIENTES AGRUPADOS ===");
   for (const exp of resultado.expedientes) {
     console.log(
-      `- ${exp.identificacion} (${exp.nombreTercero ?? "Sin nombre"}) | periodo=${exp.periodo} | registros=${exp.cantidadRegistros} | total=${exp.montoTotal.toFixed(2)} | pendientes=${exp.tienePendientesRevision}`
+      `- ${exp.identificacion} (${exp.nombreTercero ?? "Sin nombre"}) | periodo=${exp.periodo} | registros=${exp.cantidadRegistros} (listos=${exp.cantidadListos}, rev=${exp.cantidadRevisionRapida}) | total=${exp.montoTotal.toFixed(2)} | pendientes=${exp.tienePendientesRevision}`
     );
   }
+
+  console.log("\n=== RESUMEN DEL LOTE ===");
+  console.log(JSON.stringify(resultado.resumen, null, 2));
 }
 
 main().catch((err) => {

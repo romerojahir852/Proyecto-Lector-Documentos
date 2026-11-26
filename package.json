@@ -6,9 +6,18 @@
   "description": "Motor SaaS multi-tenant de procesamiento y validación documental",
   "scripts": {
     "test": "node --test tests/*.test.ts",
-    "simulate": "node scripts/simular-lote.ts"
+    "simulate": "node scripts/simular-lote.ts",
+    "db:check": "node scripts/probar-db.ts",
+    "db:migrate": "node scripts/aplicar-schema.ts",
+    "flow:run": "node scripts/ejecutar-flujo-real.ts"
   },
   "engines": {
     "node": ">=24.0.0"
+  },
+  "dependencies": {
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

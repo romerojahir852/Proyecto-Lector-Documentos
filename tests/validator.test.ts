@@ -24,11 +24,13 @@ describe("normalizarMonto", () => {
     assert.equal(normalizarMonto(1500), 1500);
   });
 
-  it("rechaza montos vacíos, cero, negativos o no numéricos", () => {
+  it("rechaza montos vacíos, cero (por defecto), negativos o no numéricos", () => {
     assert.equal(normalizarMonto(null), null);
     assert.equal(normalizarMonto(""), null);
     assert.equal(normalizarMonto("0"), null);
+    assert.equal(normalizarMonto("0.00", true), 0);
     assert.equal(normalizarMonto("-45.00"), null);
+    assert.equal(normalizarMonto("-45.00", true), null);
     assert.equal(normalizarMonto("abc"), null);
   });
 });
@@ -55,7 +57,7 @@ describe("validarYClasificarRegistro", () => {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-20",
         monto: "1,250.75",
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         referencia: "FAC-001-000123",
         confianza: 0.96,
         hashSha256: "hash-limpio-1",
@@ -66,7 +68,7 @@ describe("validarYClasificarRegistro", () => {
     assert.equal(res.estadoFlujo, "listo");
     assert.deepEqual(res.motivosAlerta, []);
     assert.equal(res.montoNormalizado, 1250.75);
-    assert.equal(res.identificacionLimpia, "1790012345001");
+    assert.equal(res.identificacionLimpia, "1790012344001");
     assert.equal(res.fechaValida, "2026-11-20");
   });
 
@@ -76,7 +78,7 @@ describe("validarYClasificarRegistro", () => {
         tipoDocumento: "comprobante",
         fechaDocumento: "2026-11-20",
         monto: 45.2,
-        identificacion: "0991234567001",
+        identificacion: "0991234578001",
         referencia: "TRF-9988",
         confianza: 0.84,
         hashSha256: "hash-ocr-bajo",
@@ -97,7 +99,7 @@ describe("validarYClasificarRegistro", () => {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-20",
         monto: 100,
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         referencia: "FAC-002",
         confianza: 0.99,
         hashSha256: "hash-existente",
@@ -112,7 +114,7 @@ describe("validarYClasificarRegistro", () => {
   it("detecta duplicado probable aunque cambie el hash del archivo", () => {
     const ctx = crearContextoBase();
     ctx.clavesDuplicadoProbable.add(
-      generarClaveDuplicadoProbable("1790012345001", "2026-11-20", 250.0, "FAC-003")
+      generarClaveDuplicadoProbable("1790012344001", "2026-11-20", 250.0, "FAC-003")
     );
 
     const res = validarYClasificarRegistro(
@@ -120,7 +122,7 @@ describe("validarYClasificarRegistro", () => {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-20",
         monto: "250,00",
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         referencia: "fac-003",
         confianza: 0.95,
         hashSha256: "hash-distinto-foto-reimpresa",
@@ -141,7 +143,7 @@ describe("validarYClasificarRegistro", () => {
         tipoDocumento: "factura",
         fechaDocumento: "2026-11-20",
         monto: 5000,
-        identificacion: "1790012345001",
+        identificacion: "1790012344001",
         referencia: "FAC-GRANDE",
         confianza: 0.99,
         hashSha256: "hash-grande",
@@ -151,5 +153,91 @@ describe("validarYClasificarRegistro", () => {
 
     assert.equal(res.estadoFlujo, "revision_rapida");
     assert.ok(res.motivosAlerta.includes("SUPERA_UMBRAL_REVISION"));
+  });
+
+  it("marca IDENTIFICACION_FORMATO_DUDOSO si es numérica pero no tiene 10 ni 13 dígitos", () => {
+    const res = validarYClasificarRegistro(
+      {
+        tipoDocumento: "factura",
+        fechaDocumento: "2026-11-20",
+        monto: 120,
+        identificacion: "12345678",
+        referencia: "FAC-009",
+        confianza: 0.99,
+        hashSha256: "hash-id-dudosa",
+      },
+      crearContextoBase()
+    );
+
+    assert.equal(res.estadoFlujo, "revision_rapida");
+    assert.equal(res.identificacionLimpia, "12345678");
+    assert.ok(res.motivosAlerta.includes("IDENTIFICACION_FORMATO_DUDOSO"));
+  });
+
+  it("detecta dígito verificador inválido en cédula y RUC ecuatoriano", () => {
+    const cedulaMala = validarYClasificarRegistro(
+      {
+        tipoDocumento: "factura",
+        fechaDocumento: "2026-11-20",
+        monto: 50,
+        identificacion: "1710034069", // dígito correcto es 5
+        referencia: "FAC-CED",
+        confianza: 0.99,
+        hashSha256: "hash-ced-mala",
+      },
+      crearContextoBase()
+    );
+    assert.equal(cedulaMala.estadoFlujo, "revision_rapida");
+    assert.ok(cedulaMala.motivosAlerta.includes("IDENTIFICACION_DIGITO_VERIFICADOR_INVALIDO"));
+
+    const rucMalo = validarYClasificarRegistro(
+      {
+        tipoDocumento: "factura",
+        fechaDocumento: "2026-11-20",
+        monto: 50,
+        identificacion: "1790012345001", // dígito correcto es 4
+        referencia: "FAC-RUC",
+        confianza: 0.99,
+        hashSha256: "hash-ruc-malo",
+      },
+      crearContextoBase()
+    );
+    assert.equal(rucMalo.estadoFlujo, "revision_rapida");
+    assert.ok(rucMalo.motivosAlerta.includes("IDENTIFICACION_DIGITO_VERIFICADOR_INVALIDO"));
+
+    const rucPublicoValido = validarYClasificarRegistro(
+      {
+        tipoDocumento: "factura",
+        fechaDocumento: "2026-11-20",
+        monto: 50,
+        identificacion: "1760001550001",
+        referencia: "FAC-PUB",
+        confianza: 0.99,
+        hashSha256: "hash-ruc-pub",
+      },
+      crearContextoBase()
+    );
+    assert.equal(rucPublicoValido.estadoFlujo, "listo");
+  });
+
+  it("acepta monto 0.00 cuando permitirMontoCero está activo", () => {
+    const ctx = crearContextoBase();
+    ctx.permitirMontoCero = true;
+
+    const res = validarYClasificarRegistro(
+      {
+        tipoDocumento: "comprobante",
+        fechaDocumento: "2026-11-20",
+        monto: "0.00",
+        identificacion: "1710034065",
+        referencia: "RET-001",
+        confianza: 0.99,
+        hashSha256: "hash-cero",
+      },
+      ctx
+    );
+
+    assert.equal(res.estadoFlujo, "listo");
+    assert.equal(res.montoNormalizado, 0);
   });
 });
